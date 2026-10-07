@@ -1,0 +1,108 @@
+name: Collect and publish MarketBoard
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Roughly 19:30 and 07:30 Beijing time. Each asset retains its actual close date.
+    - cron: '30 11 * * *'
+    - cron: '30 23 * * *'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: marketboard-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out public workflow
+        uses: actions/checkout@v4
+        with:
+          path: public
+
+      - name: Check out private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_SOURCE_REPO }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: source
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: source/requirements-core.txt
+
+      - name: Install free data adapters
+        run: python -m pip install -r source/requirements-core.txt
+
+      - name: Restore last published cache
+        env:
+          MARKETBOARD_PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: |
+          if [ -f public/last-successful-run.txt ]; then
+            echo 'MARKETBOARD_REQUIRE_LIVE_STATE=1' >> "$GITHUB_ENV"
+            MARKETBOARD_REQUIRE_LIVE_STATE=1 python source/cloud/restore_state.py
+          else
+            python source/cloud/restore_state.py
+          fi
+
+      - name: Collect and build static site
+        env:
+          # Only the morning schedule uses the key. A second automatic run cannot
+          # silently spend another daily quota when a prior-site fetch fails.
+          DATABULL_API_KEY: ${{ github.event.schedule == '30 23 * * *' && secrets.DATABULL_API_KEY || '' }}
+        run: |
+          cd source
+          python -m marketboard.cloud --output ../site || python -m marketboard.cloud --build-only --output ../site
+
+      - name: Validate publication payload
+        run: |
+          python -c "import json,pathlib; p=pathlib.Path('site/data'); d=json.loads((p/'dashboard.json').read_text()); a=json.loads((p/'analysis.json').read_text()); assert sum(bool(x.get('quote')) for x in d['assets']) > 0; assert isinstance(a['modules'],dict); assert (p/'brief.json').exists(); print('Ready:',len(d['assets']),'assets')"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages files
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy public URL
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Record successful publication
+        run: |
+          date -u +'%Y-%m-%d %H:%M:%S UTC' > public/last-successful-run.txt
+          git -C public config user.name 'github-actions[bot]'
+          git -C public config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C public add last-successful-run.txt
+          git -C public commit -m 'Record successful MarketBoard publication'
+          git -C public push origin HEAD:main
+
+      - name: Create daily snapshot and keep 90 days
+        if: github.event.schedule == '30 23 * * *'
+        working-directory: public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="snapshot-$(date -u +%F)"
+          tar -czf marketboard-snapshot.tar.gz -C ../site .
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Snapshot $tag already exists"
+          else
+            gh release create "$tag" marketboard-snapshot.tar.gz --title "MarketBoard $tag" --notes "Public read-only market data snapshot. Each asset shows its actual close date."
+          fi
+          gh release list --limit 200 --json tagName | python cleanup_releases.py
