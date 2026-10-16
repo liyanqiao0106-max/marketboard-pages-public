@@ -2,10 +2,10 @@ name: Collect and publish MarketBoard
 
 on:
   workflow_dispatch:
-schedule:
-  # 北京时间每个工作日 16:17；GitHub cron 使用 UTC。
-  - cron: '17 8 * * 1-5'
-  
+  schedule:
+    # 北京时间每个工作日 16:17；GitHub cron 使用 UTC。
+    - cron: '17 8 * * 1-5'
+
 permissions:
   contents: write
   pages: write
@@ -59,8 +59,6 @@ jobs:
 
       - name: Collect and build static site
         env:
-          # Only the morning schedule uses the key. A second automatic run cannot
-          # silently spend another daily quota when a prior-site fetch fails.
           DATABULL_API_KEY: ${{ secrets.DATABULL_API_KEY }}
         run: |
           cd source
