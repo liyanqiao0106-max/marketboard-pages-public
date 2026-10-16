@@ -61,7 +61,7 @@ jobs:
         env:
           # Only the morning schedule uses the key. A second automatic run cannot
           # silently spend another daily quota when a prior-site fetch fails.
-          DATABULL_API_KEY: ${{ github.event.schedule == '30 23 * * *' && secrets.DATABULL_API_KEY || '' }}
+          DATABULL_API_KEY: ${{ secrets.DATABULL_API_KEY }}
         run: |
           cd source
           python -m marketboard.cloud --output ../site || python -m marketboard.cloud --build-only --output ../site
