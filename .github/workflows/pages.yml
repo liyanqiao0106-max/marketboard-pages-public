@@ -2,11 +2,10 @@ name: Collect and publish MarketBoard
 
 on:
   workflow_dispatch:
-  schedule:
-    # Roughly 19:30 and 07:30 Beijing time. Each asset retains its actual close date.
-    - cron: '30 11 * * *'
-    - cron: '30 23 * * *'
-
+schedule:
+  # 北京时间每个工作日 16:17；GitHub cron 使用 UTC。
+  - cron: '17 8 * * 1-5'
+  
 permissions:
   contents: write
   pages: write
@@ -93,7 +92,7 @@ jobs:
           git -C public push origin HEAD:main
 
       - name: Create daily snapshot and keep 90 days
-        if: github.event.schedule == '30 23 * * *'
+        if: github.event.schedule == '17 8 * * 1-5'
         working-directory: public
         env:
           GH_TOKEN: ${{ github.token }}
