@@ -66,7 +66,7 @@ jobs:
 
       - name: Validate publication payload
         run: |
-          python -c "import json,pathlib; p=pathlib.Path('site/data'); d=json.loads((p/'dashboard.json').read_text()); a=json.loads((p/'analysis.json').read_text()); r=d.get('research_assets',[]); assert sum(bool(x.get('quote')) for x in d['assets']) > 0; assert len(r)==16 and sum(bool(x.get('quote')) for x in r)>0; assert isinstance(a['modules'],dict); assert (p/'brief.json').exists(); print('Ready:',len(d['assets']),'base assets and',len(r),'research assets')"
+          python -c "import json,pathlib; p=pathlib.Path('site/data'); d=json.loads((p/'dashboard.json').read_text()); a=json.loads((p/'analysis.json').read_text()); r=d.get('research_assets',[]); assert len(d['assets'])==54 and sum(bool(x.get('quote')) for x in d['assets']) > 0; assert any(x.get('symbol')=='2330.TW' and x.get('quote') for x in d['assets']); assert len(r)==16 and sum(bool(x.get('quote')) for x in r)>0; assert isinstance(a['modules'],dict); assert (p/'brief.json').exists(); print('Ready:',len(d['assets']),'base assets and',len(r),'research assets')"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
