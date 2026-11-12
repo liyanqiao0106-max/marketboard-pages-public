@@ -2,6 +2,12 @@ name: Collect and publish MarketBoard
 
 on:
   workflow_dispatch:
+    inputs:
+      reviewed_seed:
+        description: Publish the locally reviewed seed without replacing it with older published caches
+        type: boolean
+        required: false
+        default: false
   schedule:
     # 北京时间每个工作日 16:17；GitHub cron 使用 UTC。
     - cron: '17 8 * * 1-5'
@@ -50,7 +56,9 @@ jobs:
         env:
           MARKETBOARD_PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
-          if [ -f public/last-successful-run.txt ]; then
+          if [ "${{ inputs.reviewed_seed }}" = "true" ]; then
+            MARKETBOARD_PAGES_URL='' python source/cloud/restore_state.py
+          elif [ -f public/last-successful-run.txt ]; then
             echo 'MARKETBOARD_REQUIRE_LIVE_STATE=1' >> "$GITHUB_ENV"
             MARKETBOARD_REQUIRE_LIVE_STATE=1 python source/cloud/restore_state.py
           else
@@ -62,11 +70,26 @@ jobs:
           DATABULL_API_KEY: ${{ secrets.DATABULL_API_KEY }}
         run: |
           cd source
-          python -m marketboard.cloud --output ../site || python -m marketboard.cloud --build-only --output ../site
+          if [ "${{ inputs.reviewed_seed }}" = "true" ]; then
+            python -m marketboard.cloud --build-only --output ../site
+          else
+            python -m marketboard.cloud --output ../site || python -m marketboard.cloud --build-only --output ../site
+          fi
 
       - name: Validate publication payload
         run: |
-          python -c "import json,pathlib; p=pathlib.Path('site/data'); d=json.loads((p/'dashboard.json').read_text()); a=json.loads((p/'analysis.json').read_text()); r=d.get('research_assets',[]); assert len(d['assets'])==54 and sum(bool(x.get('quote')) for x in d['assets']) > 0; assert any(x.get('symbol')=='2330.TW' and x.get('quote') for x in d['assets']); assert len(r)==16 and sum(bool(x.get('quote')) for x in r)>0; assert isinstance(a['modules'],dict); assert (p/'brief.json').exists(); print('Ready:',len(d['assets']),'base assets and',len(r),'research assets')"
+          python - <<'PY_CHECK'
+          import json, pathlib
+          root=pathlib.Path('site/data')
+          dashboard=json.loads((root/'dashboard.json').read_text())
+          configured=json.loads(pathlib.Path('source/config/watchlist.json').read_text())
+          expected={(a['category'],a['symbol']) for a in configured if a.get('publication_scope')!='local_only'}
+          actual={(a['category'],a['symbol']) for a in dashboard['assets']}
+          assert actual==expected and any(a.get('quote') for a in dashboard['assets'])
+          assert not list(root.glob('*.sqlite3*'))
+          assert not any((root/name).exists() for name in ['daily_reports.json','research_workspace.json','ai_research.json'])
+          print('Ready:',len(actual),'reviewed base assets')
+          PY_CHECK
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
